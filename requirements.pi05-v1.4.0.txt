@@ -1,0 +1,25 @@
+# Versions verified in the Dadao XH2 V1.4.0 conversion image.
+# Keep the vendor-provided torch/tcim/xhquant packages from the base image.
+modelscope==1.37.1
+datasets==4.8.4
+diffusers==0.38.0
+accelerate==1.10.1
+draccus==0.8.0
+onnx==1.18.0
+onnxruntime==1.24.4
+onnxscript==0.6.2
+onnxsim==0.4.36
+typing_inspect
+mergedeep
+orderly_set
+compressed_tensors
+av
+pyserial
+deepdiff
+imageio
+gymnasium
+onnxslim
+
+# Pin the exact custom LeRobot/OpenPI-compatible transformers revision that was
+# used in the successful export. Its reported package version is 4.53.3.
+transformers @ git+https://github.com/huggingface/transformers.git@dcddb970176382c0fcf4521b0c0e6fc15894dfe0

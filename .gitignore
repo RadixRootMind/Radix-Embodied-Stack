@@ -1,0 +1,34 @@
+# Models, datasets, compiler products, and local caches
+models/
+data/
+artifacts/
+outputs/
+cache/
+*.hmm
+*.hmonnx
+*.onnx
+*.pt
+*.pth
+*.safetensors
+*_external_data
+
+# Local environment and device state
+.env
+env.env
+*.log
+core
+core.*
+calibration/
+
+# Python/editor files
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.idea/
+.vscode/
+
+# Vendor source supplied separately
+third_party/xh_model_zoo/
