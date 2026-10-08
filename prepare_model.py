@@ -26,15 +26,7 @@ def main() -> None:
     if not config.is_file() or not preprocessor.is_file():
         raise SystemExit("Checkpoint must contain config.json and policy_preprocessor.json")
 
-    update_json(
-        config,
-        {
-            "type": "pi05" if args.mode == "export" else "hm_pi05",
-            "device": "cpu",
-            "compile_model": False,
-        },
-    )
-
+    # Validate the preprocessor before writing config.json.
     data = json.loads(preprocessor.read_text(encoding="utf-8"))
 
     def patch(value: object) -> None:
@@ -51,6 +43,14 @@ def main() -> None:
                 patch(child)
 
     patch(data)
+    update_json(
+        config,
+        {
+            "type": "pi05" if args.mode == "export" else "hm_pi05",
+            "device": "cpu",
+            "compile_model": False,
+        },
+    )
     preprocessor.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"Prepared {args.model} for {args.mode}")
 
