@@ -39,7 +39,7 @@ def main() -> None:
         "id": args.robot_id,
     }
     if args.calibration_dir:
-        kwargs["calibration_dir"] = args.calibration_dir
+        kwargs["calibration_dir"] = Path(args.calibration_dir)
 
     robot = SO101Follower(SO101FollowerConfig(**kwargs))
     robot.connect(calibrate=False)
