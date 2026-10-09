@@ -3,10 +3,8 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(PROJECT_ROOT / "third_party" / "lerobot" / "src"))
+sys.path.insert(0, "./lerobot/src")
 
 from lerobot.motors import MotorCalibration
 from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig

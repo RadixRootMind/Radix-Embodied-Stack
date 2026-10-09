@@ -1,8 +1,8 @@
 quant_config = dict(inputs=dict())
 target_device = "XH2a"
 frontend_type = "TorchFX"
-hf_model_dir = "./models/pretrained_model"
-config_dir = "./models/paligemma-3b-pt-224"
+hf_model_dir = "models/pretrained_model"
+config_dir = "models/paligemma-3b-pt-224"
 
 quant_config = dict()
 model = dict(
@@ -10,7 +10,7 @@ model = dict(
     hf_model=hf_model_dir,
     wrap_cfg=dict(
         max_sequence_length=1024,
-        input_sequence_length=968,
+        input_sequence_length=712,
         use_cache=True,
         num_logits_to_keep=1,
         kv_cache=dict(

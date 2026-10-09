@@ -1,9 +1,11 @@
 # Models, datasets, compiler products, and local caches
-models/
-data/
-artifacts/
-outputs/
-cache/
+/models/
+/data/
+/artifacts/
+/outputs/
+/outputs_*/
+/cache/
+/log/
 *.hmm
 *.hmonnx
 *.onnx
@@ -16,9 +18,11 @@ cache/
 .env
 env.env
 *.log
-core
-core.*
-calibration/
+*.bak
+*.bak_*
+/core
+/core.*
+/calibration/
 
 # Python/editor files
 __pycache__/
@@ -31,4 +35,4 @@ __pycache__/
 .vscode/
 
 # Vendor source supplied separately
-third_party/xh_model_zoo/
+/third_party/xh_model_zoo/

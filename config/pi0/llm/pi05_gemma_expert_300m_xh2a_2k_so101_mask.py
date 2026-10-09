@@ -1,8 +1,8 @@
 quant_config = dict(inputs=dict())
 target_device = "XH2a"
 frontend_type = "TorchFX"
-hf_model_dir = "./models/pretrained_model"
-config_dir = "./models/paligemma-3b-pt-224"
+hf_model_dir = "models/pretrained_model"
+config_dir = "models/paligemma-3b-pt-224"
 
 quant_config = dict()
 model = dict(

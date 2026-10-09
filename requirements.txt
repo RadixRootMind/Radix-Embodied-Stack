@@ -1,0 +1,21 @@
+modelscope
+datasets
+typing_inspect
+mergedeep
+diffusers
+orderly_set
+compressed_tensors
+onnxscript==0.4.0
+torchcodec==0.6.0 --index-url https://download.pytorch.org/whl/cu128
+av
+draccus
+serial
+deepdiff
+accelerate
+imageio
+gymnasium
+hf-libero==0.1.3
+onnxslim
+transformers@git+https://github.com/huggingface/transformers.git@fix/lerobot_openpi
+
+# sudo apt install -y libosmesa6 libosmesa6-dev
