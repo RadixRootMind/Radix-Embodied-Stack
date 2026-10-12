@@ -237,7 +237,7 @@ def make_robot(args: argparse.Namespace) -> SO101Follower:
         "use_degrees": args.use_degrees,
     }
     if args.calibration_dir:
-        cfg_kwargs["calibration_dir"] = args.calibration_dir
+        cfg_kwargs["calibration_dir"] = Path(args.calibration_dir)
     return SO101Follower(SO101FollowerConfig(**cfg_kwargs))
 
 
