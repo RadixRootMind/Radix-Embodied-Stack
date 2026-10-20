@@ -26,8 +26,9 @@ from lerobot.utils.constants import (
 PRINT_DEBUG = os.environ.get("DEBUG", "0")
 assert PRINT_DEBUG in ["0", "1"], "DEBUG must be 0 or 1"
 PRINT_DEBUG = PRINT_DEBUG == "1"
-PROJECT_ROOT = Path(__file__).resolve().parent
-ARTIFACT_DIR = Path(os.environ.get("HOUMO_ARTIFACT_DIR", PROJECT_ROOT / "artifacts" / "xh2"))
+
+# 产物目录常量(后摩 .hmm 文件存放位置)
+ARTIFACT_DIR = Path("./outputs/xh2")
 
 
 class ActionSelectKwargs(TypedDict, total=False):
@@ -189,30 +190,35 @@ class PaliGemmaWithExpertModel(nn.Module):
 
     def __init__(self):
         super().__init__()
-        vision_model_path = ARTIFACT_DIR / "siglip.hmm"
-        gemma_2b_prefill_model_path = ARTIFACT_DIR / "gemma_2b_prefill.hmm"
+        vision_model_path = "./outputs/xh2/siglip.hmm"
+        gemma_2b_prefill_model_path = "./outputs/xh2/gemma_2b_prefill.hmm"
         gemma_expert_300m_decode_model_path = (
-            ARTIFACT_DIR / "gemma_expert_300m_decode.hmm"
+            "./outputs/xh2/gemma_expert_300m_decode.hmm"
         )
-        embedding_path = ARTIFACT_DIR / "embedding.pt"
+        embedding_path = "./outputs/xh2/embedding.pt"
         wm = tcim.runtime.WeightManager(device=0)
         option0 = tcim.runtime.Option(wm)
         option1 = tcim.runtime.Option(wm)
         option2 = tcim.runtime.Option(wm)
-        self.paligemma = tcim.runtime.load(str(vision_model_path), option0)
-        self.gemma_2b = tcim.runtime.load(str(gemma_2b_prefill_model_path), option1)
+        self.paligemma = tcim.runtime.load(vision_model_path, option0)
+        self.gemma_2b = tcim.runtime.load(gemma_2b_prefill_model_path, option1)
+        self.prefill_input_sequence_length = None
         # show input info
         for idx in range(self.gemma_2b.get_num_inputs()):
             name = self.gemma_2b.get_input_name(idx)
             info = self.gemma_2b.get_input_info(name)
+            if name == "input_1":
+                self.prefill_input_sequence_length = int(info.shape[1])
             if name.startswith("model_layer"):
                 continue
             print(
                 f"[Pi05][gemma-2b] input_info[{name}] shape = {info.shape}, dtype = {info.dtype}, format = {info.format}, stride = {info.stride}"
             )
+        if self.prefill_input_sequence_length is None:
+            raise RuntimeError("Unable to read gemma prefill input sequence length from input_1")
         dummy_tensor_names = self.get_dummy_tensor_names()
         self.gemma_300m_expert = tcim.runtime.load(
-            str(gemma_expert_300m_decode_model_path), option2
+            gemma_expert_300m_decode_model_path, option2
         )
         # pass kvcache
         for name in dummy_tensor_names:
@@ -266,6 +272,22 @@ class PaliGemmaWithExpertModel(nn.Module):
         if inputs_embeds.dtype != torch.float16:
             inputs_embeds = inputs_embeds.half()
 
+        # Pad inputs_embeds to the compiled Gemma prefill input sequence length.
+        target_seq = self.prefill_input_sequence_length
+        cur_seq = inputs_embeds.shape[1]
+        if cur_seq < target_seq:
+            pad_emb = target_seq - cur_seq
+            inputs_embeds = torch.nn.functional.pad(
+                inputs_embeds, (0, 0, 0, pad_emb), value=0.0
+            )
+
+        # Pad attention_mask dim(-2) to the same compiled prefix length.
+        if attention_mask.size(-2) < target_seq:
+            row_pad = target_seq - attention_mask.size(-2)
+            attention_mask = torch.nn.functional.pad(
+                attention_mask, (0, 0, 0, row_pad), value=-2.3820e38
+            )
+
         pad_len = 1024 - attention_mask.size(-1)
         if pad_len > 0:
             attention_mask = torch.nn.functional.pad(
@@ -279,6 +301,8 @@ class PaliGemmaWithExpertModel(nn.Module):
         #     attention_mask.size(2),
         #     attention_mask.size(3),
         # )
+        if PRINT_DEBUG:
+            print(f"[Pi05][gemma-2b] prefill actual_seq={cur_seq}, target_seq={target_seq}, attention_mask={tuple(attention_mask.shape)}")
         if attention_mask.dtype != torch.float16:
             attention_mask = attention_mask.half()
 
@@ -320,6 +344,8 @@ class PaliGemmaWithExpertModel(nn.Module):
         inputs_embeds: FloatTensor,
         adarms_cond: Tensor | None = None,
     ):
+        if PRINT_DEBUG:
+            print(f"[Pi05][gemma-2b] decode inputs_embeds={tuple(inputs_embeds.shape)}, attention_mask={tuple(attention_mask.shape)}, valid_kvcache_length={self.valid_kvcache_length}")
         if attention_mask.dtype != torch.float16:
             attention_mask = attention_mask.half()
 
@@ -374,13 +400,13 @@ class PI05PolicyXH2a(nn.Module):
 
         self.paligemma_with_expert = PaliGemmaWithExpertModel()
 
-        time_mlp_model_path = ARTIFACT_DIR / "time_mlp.hmm"
-        action_in_proj_model_path = ARTIFACT_DIR / "action_in_proj.hmm"
-        action_out_proj_model_path = ARTIFACT_DIR / "action_out_proj.hmm"
+        time_mlp_model_path = "./outputs/xh2/time_mlp.hmm"
+        action_in_proj_model_path = "./outputs/xh2/action_in_proj.hmm"
+        action_out_proj_model_path = "./outputs/xh2/action_out_proj.hmm"
 
-        self.action_in_proj_model = tcim.runtime.load(str(action_in_proj_model_path))
-        self.action_out_proj_model = tcim.runtime.load(str(action_out_proj_model_path))
-        self.time_mlp_model = tcim.runtime.load(str(time_mlp_model_path))
+        self.action_in_proj_model = tcim.runtime.load(action_in_proj_model_path)
+        self.action_out_proj_model = tcim.runtime.load(action_out_proj_model_path)
+        self.time_mlp_model = tcim.runtime.load(time_mlp_model_path)
         self.action_in_proj_out_shape = self.action_in_proj_model.get_output_info(
             "action_in_proj_out"
         ).shape
@@ -774,10 +800,11 @@ class HMPI05Policy(PreTrainedPolicy):
 
         device = "cpu"
 
+        # Follow LeRobot PI0.5 exactly: preserve configured camera order.
         present_img_keys = [key for key in self.config.image_features if key in batch]
-        missing_img_keys = [
-            key for key in self.config.image_features if key not in batch
-        ]
+        missing_img_keys = [key for key in self.config.image_features if key not in batch]
+        if PRINT_DEBUG:
+            print(f"[Pi05][images] present_img_keys={present_img_keys}")
 
         if len(present_img_keys) == 0:
             raise ValueError(
@@ -810,13 +837,19 @@ class HMPI05Policy(PreTrainedPolicy):
             if img.shape[1:3] != self.config.image_resolution:
                 img = resize_with_pad_torch(img, *self.config.image_resolution)
 
-            # Normalize from [0,1] to [-1,1] as expected by siglip
+            # Normalize from [0,1] to [-1,1] as expected by SigLIP.
+            # Keep this identical to LeRobot PI0.5/OpenPI; resize padding may already be -1.
             img = img * 2.0 - 1.0
 
             # from openpi preprocess_observation_pytorch: Convert back to [B, C, H, W] format if it was originally channels-first
             if is_channels_first:
                 img = img.permute(0, 3, 1, 2)  # [B, H, W, C] -> [B, C, H, W]
 
+            if PRINT_DEBUG:
+                print(
+                    f"[Pi05][images] {key}: shape={tuple(img.shape)}, dtype={img.dtype}, "
+                    f"min={float(img.min()):.4f}, max={float(img.max()):.4f}, mean={float(img.mean()):.4f}"
+                )
             images.append(img)
             # Create mask (all ones for real images)
             bsize = img.shape[0]

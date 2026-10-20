@@ -63,17 +63,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--disable-torque-on-disconnect", action="store_true")
     parser.add_argument("--motor-read-retries", type=int, default=5)
     parser.add_argument("--motor-read-retry-sleep-s", type=float, default=0.02)
-    parser.add_argument("--no-clip-action-range", action="store_true")
+    parser.add_argument(
+        "--clip-action-range",
+        action="store_true",
+        help="Optionally clip absolute action values before send_action; disabled by default to match LeRobot rollout.",
+    )
+    parser.add_argument("--no-clip-action-range", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--use-degrees", action="store_true", help="Use joint angles in degrees, matching the training dataset.")
     parser.add_argument(
         "--max-relative-target",
-        default="5.0",
+        default="10.0",
         help="Maximum per-step relative motor target. Use 'none' to disable this safety clamp.",
     )
     parser.add_argument("--camera-type", choices=["opencv", "realsense"], default="opencv")
     parser.add_argument("--top-camera", required=True)
     parser.add_argument("--side-camera", required=True)
-    parser.add_argument("--top-camera-fourcc", default="YUYV")
+    parser.add_argument("--top-camera-fourcc", default="MJPG")
     parser.add_argument("--side-camera-fourcc", default="MJPG")
     parser.add_argument("--camera-width", type=int, default=640)
     parser.add_argument("--camera-height", type=int, default=480)
@@ -85,6 +90,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="Use dummy observations and do not connect the robot.")
     parser.add_argument("--send-action", action="store_true", help="Actually send predicted actions to the SO101.")
     parser.add_argument("--log-level", default="INFO")
+    parser.add_argument("--debug-observation", action="store_true", help="Print real observation/image stats for the first few steps.")
+    parser.add_argument("--debug-observation-steps", type=int, default=3)
+    parser.add_argument("--debug-image-dir", default=None, help="Optional directory to save captured top/side frames for debugging.")
     return parser.parse_args()
 
 
@@ -131,8 +139,11 @@ def check_model_config(model_path: Path) -> None:
     cfg = json.loads(cfg_path.read_text())
     if cfg.get("type") != "hm_pi05":
         raise RuntimeError(f"{cfg_path} has type={cfg.get('type')!r}; set it to 'hm_pi05' before Houmo inference.")
-    if cfg.get("output_features", {}).get("action", {}).get("shape") != [6]:
-        raise RuntimeError(f"{cfg_path} does not look like a 6-action SO101 checkpoint.")
+    shape = cfg.get("output_features", {}).get("action", {}).get("shape")
+    # pi05 内部动作空间是 [32], 后处理 postprocessor 会自动转回 6/7 维关节动作
+    if shape not in ([6], [7], [32]):
+        raise RuntimeError(f"{cfg_path} action shape={shape!r}; expected [6]/[7]/[32] for SO101.")
+        raise RuntimeError(f"{cfg_path} action shape={shape!r}; expected [6]/[7]/[32] for SO101.")
 
 
 def load_policy(model_path: Path):
@@ -170,6 +181,44 @@ def make_dummy_observation(top_height: int, top_width: int, side_height: int, si
     return obs
 
 
+
+
+def _image_to_uint8(image: np.ndarray) -> np.ndarray:
+    arr = np.asarray(image)
+    if arr.dtype == np.uint8:
+        return arr
+    arr = arr.astype(np.float32)
+    if arr.size and float(np.nanmax(arr)) <= 1.0:
+        arr = arr * 255.0
+    return np.clip(arr, 0, 255).astype(np.uint8)
+
+
+def debug_observation(step: int, obs: dict, image_dir: str | None = None) -> None:
+    keys = list(obs.keys())
+    print(f"[debug obs {step:04d}] keys={keys}", flush=True)
+    for cam_key in ("top", "side"):
+        if cam_key not in obs:
+            print(f"[debug obs {step:04d}] missing camera key: {cam_key}", flush=True)
+            continue
+        arr = np.asarray(obs[cam_key])
+        if arr.size:
+            stats = f"min={float(np.nanmin(arr)):.3f} max={float(np.nanmax(arr)):.3f} mean={float(np.nanmean(arr)):.3f}"
+        else:
+            stats = "empty"
+        print(f"[debug obs {step:04d}] {cam_key}: shape={arr.shape} dtype={arr.dtype} {stats}", flush=True)
+        if image_dir is not None:
+            out_dir = Path(image_dir)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_path = out_dir / f"{step:04d}_{cam_key}.png"
+            try:
+                from PIL import Image
+
+                Image.fromarray(_image_to_uint8(arr)).save(out_path)
+                print(f"[debug obs {step:04d}] saved {cam_key} frame: {out_path}", flush=True)
+            except Exception as exc:
+                logging.warning("Failed to save debug image %s: %s", out_path, exc, exc_info=True)
+
+
 def make_robot(args: argparse.Namespace) -> SO101Follower:
     top_width = args.top_camera_width or args.camera_width
     top_height = args.top_camera_height or args.camera_height
@@ -188,7 +237,7 @@ def make_robot(args: argparse.Namespace) -> SO101Follower:
         "use_degrees": args.use_degrees,
     }
     if args.calibration_dir:
-        cfg_kwargs["calibration_dir"] = args.calibration_dir
+        cfg_kwargs["calibration_dir"] = Path(args.calibration_dir)
     return SO101Follower(SO101FollowerConfig(**cfg_kwargs))
 
 
@@ -277,8 +326,10 @@ def main() -> None:
                 if args.dry_run
                 else get_observation_with_retries(robot, args)
             )
+            if args.debug_observation and step < args.debug_observation_steps:
+                debug_observation(step, obs, args.debug_image_dir)
             action = run_once(obs, features, policy, preprocess, postprocess, args.task, robot_type)
-            if not args.no_clip_action_range:
+            if args.clip_action_range and not args.no_clip_action_range:
                 action = clip_action_range(action)
             elapsed_ms = (time.perf_counter() - start) * 1000.0
             print(f"[{step:04d}] {elapsed_ms:.1f} ms action={action}", flush=True)

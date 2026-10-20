@@ -1,100 +1,97 @@
 # PI0.5 on Houmo M50 for SO101
 
-**From a LeRobot PI0.5 checkpoint to W8A8 HMONNX, M50 HMM, and SO101 closed-loop inference**
+**From a LeRobot PI0.5 checkpoint to Houmo W8A8 HMONNX, M50 HMM, and SO101 closed-loop inference.**
 
-[![Related project: RadixQuantVLA Stars](https://img.shields.io/github/stars/RadixRootMind/RadixQuantVLA?style=social&label=RadixQuantVLA%20Stars)](https://github.com/RadixRootMind/RadixQuantVLA) [![LeRobot](https://img.shields.io/badge/Based%20on-LeRobot-blue)](https://github.com/huggingface/lerobot) [![Hardware](https://img.shields.io/badge/Target-Houmo%20M50-green)](#prerequisites) [![CPU](https://img.shields.io/badge/Host-Hygon%20C86--4G-red)](#prerequisites) [![Robot](https://img.shields.io/badge/Robot-SO101-orange)](#so101-inference)
+[![LeRobot](https://img.shields.io/badge/Based%20on-LeRobot-blue)](https://github.com/huggingface/lerobot)
+[![Target](https://img.shields.io/badge/Target-Houmo%20M50-green)](#supported-platforms)
+[![Host](https://img.shields.io/badge/Host-Hygon%20C86--4G-red)](#supported-platforms)
+[![Robot](https://img.shields.io/badge/Robot-SO101-orange)](#so101-inference)
 
-[Overview](#overview) | [Platforms](#supported-platforms) | [Architecture](docs/ARCHITECTURE.md) | [Prerequisites](#prerequisites) | [Export](#export-and-quantization) | [Compile](#compile-for-m50) | [Inference](#so101-inference) | [License](#acknowledgements-and-license)
+[Overview](#overview) | [Platforms](#supported-platforms) | [Layout](#repository-layout) | [Prepare](#checkpoint-preparation) | [Export](#w8a8-export) | [Build](#hmm-build) | [Inference](#so101-inference) | [License](#acknowledgements-and-license)
 
-> **Status:** This code was organized from an SO101 real-robot deployment.
-> Hardware results are not reported in this repository.
+> **Status:** This code was organized from a deployed SO101 real-robot environment. Hardware results are not claimed in this repository.
 
 ## Overview
 
-This project connects a fine-tuned LeRobot PI0.5 policy to a Houmo XH2/M50
-accelerator and an SO101 follower arm on a Hygon C86-4G host. It covers model
-preparation, module export, Houmo PTQ, HMM compilation, camera/state acquisition,
-and motor control.
-The original trained checkpoint is still needed for configuration, tokenizer,
-and pre/postprocessing; neural-network inference uses the compiled HMM files.
+This repository packages the PI0.5 deployment path used on a Hygon C86-4G host
+with a Houmo M50 accelerator and an SO101 follower arm. It includes the local
+LeRobot source, Houmo model-zoo integration, checkpoint patching utilities,
+W8A8 export scripts, M50 HMM build scripts, and a real-robot inference loop.
+
+The trained PI0.5 checkpoint is still required for model configuration,
+tokenizer/preprocessor/postprocessor metadata, and normalization statistics.
+Neural-network inference is performed by compiled Houmo `.hmm` artifacts.
+
+### Demo Videos
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <video src="https://github.com/user-attachments/assets/07e20a37-00ba-4bf3-9f65-1b1cb7fafeb7" controls width="420"></video>
+    </td>
+    <td align="center" width="50%">
+      <video src="https://github.com/user-attachments/assets/00bbd130-dbaf-4592-9b34-f6b7890e6e32" controls width="420"></video>
+    </td>
+  </tr>
+</table>
 
 **Key Features**
 
-- 🔧 **Model conversion:** split a LeRobot PI0.5 checkpoint into deployable modules.
-- ⚡ **M50 inference:** export HMONNX, compile HMM, and run with TCIM.
-- 📷 **Two-camera input:** combine top/side images with SO101 joint state and task text.
-- 🦾 **Robot control:** turn predicted actions into calibrated Feetech motor targets.
-
-| Component | Role | Implementation |
-| --- | --- | --- |
-| LeRobot PI0.5 | Policy configuration and pre/postprocessing | `third_party/lerobot/` |
-| Houmo export | Split modules and produce HMONNX | `export/`, `config/` |
-| M50 compiler | Produce runtime HMM binaries | `build/` |
-| TCIM runtime | Run the compiled modules | `modeling_pi05_hm.py` |
-| SO101 loop | Read cameras/joints and send actions | `run_so101_hm.py` |
-
-The path from sensors to motors is documented in [Architecture](docs/ARCHITECTURE.md).
-This is a Houmo deployment integration, **not** an implementation of the
-[QuantVLA](https://github.com/AIoT-MLSys-Lab/QuantVLA) quantization algorithm.
+- 🔧 Patch LeRobot PI0.5 checkpoint JSON for Houmo export or inference.
+- ⚡ Export PI0.5 submodules to Houmo HMONNX with W8A8 PTQ.
+- 🧱 Build M50 `.hmm` runtime artifacts from exported modules.
+- 📷 Read SO101 top/side cameras plus joint state.
+- 🦾 Run closed-loop SO101 inference and optionally send motor actions.
 
 ## Supported Platforms
 
-**Host CPU:** Hygon C86-4G (`x86_64`)
-
-**AI accelerator:** Houmo XH2/M50 (IPU), using the Dadao V1.4.0 toolchain and TCIM runtime
-
-**Robot:** SO101 follower robotic arm with Feetech motors and top/side cameras
-
-**Model/software:** LeRobot PI0.5, Houmo PTQ/HMONNX/HMM export and inference
+| Item | Deployed setup |
+| --- | --- |
+| Host CPU | Hygon C86-4G (`x86_64`) |
+| AI accelerator | Houmo XH2/M50 IPU |
+| Vendor stack | Dadao V1.4.0, `tcim`, `tcim_lite`, `xhquant` |
+| Robot | SO101 follower arm with Feetech motors |
+| Sensors | Top camera + side camera |
+| Policy | LeRobot PI0.5, 6-DoF SO101 action space |
 
 ## Repository Layout
 
 ```text
 .
-├── build/                  # HMONNX -> M50 HMM
-├── config/pi0/llm/         # Gemma-2B and action-expert graph settings
-├── docs/                   # Architecture and data contracts
-├── export/                 # PI0.5 -> ONNX/HMONNX
-├── third_party/
-│   ├── lerobot/            # Tested, modified LeRobot 0.4.4 source
-│   └── xh_model_zoo/      # Add locally from Houmo examples; not in Git
-├── calibrate_so101.py     # SO101 calibration
-├── modeling_pi05_hm.py    # TCIM-backed PI0.5 runtime
-├── prepare_model.py       # Export/runtime checkpoint configuration
-└── run_so101_hm.py        # Real-robot inference entry point
+├── config/pi0/llm/                         # SO101 Gemma-2B/action-expert export configs
+├── lerobot/                                # Local LeRobot source used by deployment
+├── xh_model_zoo/                           # Houmo model-zoo code used by conversion
+├── build_vision_so101.py                   # Build vision HMM
+├── build_gemma_2b_prefill_so101.py         # Build Gemma-2B prefill HMM
+├── build_gemma_expert_300m_decode_so101.py # Build action-expert decode HMM
+├── build_pi05_action_time_linear_so101.py  # Build action/time projection HMMs
+├── calibrate_so101.py                      # SO101 calibration helper
+├── modeling_pi05_hm.py                     # TCIM-backed PI0.5 runtime
+├── pi05_export_vision_xh2a_so101.py        # Vision export
+├── pi05_export_llm_xh2a_libero.py          # Gemma-2B export, reused by SO101 configs
+├── pi05_export_experts_xh2a_libero.py      # Action-expert export, reused by SO101 configs
+├── pi05_export_other_xh2a_libero.py        # Action/time projection export
+├── run_so101_hm.py                         # Real-robot inference entry point
+├── so101_patch_model_config.py             # Patch checkpoint/config for export or inference
+├── so101_export_quant.sh                   # One-command W8A8 export wrapper
+└── so101_build_hmm.sh                      # One-command M50 HMM build wrapper
 ```
 
-Model weights, datasets, LIBERO assets, calibration data, logs, ONNX/HMONNX,
-HMM files, and vendor SDK binaries are intentionally excluded by `.gitignore`.
+The runtime and conversion products are intentionally excluded from Git:
+`models/`, `outputs/`, `log/`, datasets, calibration caches, ONNX/HMONNX/HMM
+files, PyTorch checkpoints, and local backup files.
+
+This repository keeps the deployment sources directly at the repository root:
+`lerobot/` and `xh_model_zoo/` are first-level directories.
 
 ## Prerequisites
 
-| Item | Requirement |
-| --- | --- |
-| Deployed host CPU | Hygon C86-4G (x86_64) |
-| Accelerator | Houmo XH2/M50 with a working driver and firmware |
-| Vendor stack | Compatible Dadao V1.4.0 conversion/deployment environment, `tcim`, `tcim_lite`, `xhquant` |
-| Model zoo | Matching `xh_model_zoo` from the Houmo examples package |
-| Checkpoint | Fine-tuned LeRobot PI0.5 with two image inputs and six SO101 actions |
-| Robot | SO101 follower, Feetech USB serial adapter, and top/side cameras |
+Start from the Houmo conversion/deployment environment that already contains
+the matching vendor packages. Do not replace the vendor PyTorch, TCIM, or
+XHQuant packages with ordinary PyPI wheels unless you are rebuilding the entire
+stack.
 
-The deployed combination is **Hygon C86-4G + Houmo M50 + SO101**.
-
-Start from the vendor-provided environment. **Do not replace its PyTorch, TCIM,
-or XHQuant builds with ordinary PyPI packages.** Additional Python dependencies
-used during the original export are recorded in
-[`requirements.pi05-v1.4.0.txt`](requirements.pi05-v1.4.0.txt); install them in
-an isolated copy of the vendor environment and resolve any vendor version
-constraints before running conversion.
-
-Place the vendor model zoo at `third_party/xh_model_zoo/` as described in
-[`third_party/README.md`](third_party/README.md). Copy `.env.example` to a
-local environment file and adjust paths for your container; never commit the
-result or any access token.
-
-## Checkpoint Preparation
-
-Arrange the external files as follows:
+Expected external model layout:
 
 ```text
 models/
@@ -103,121 +100,182 @@ models/
 │   ├── model.safetensors
 │   ├── policy_preprocessor.json
 │   └── policy_postprocessor.json
-└── paligemma-3b-pt-224/
+├── paligemma-3b-pt-224/
+└── pi05_base/
 ```
 
-Run all commands below from the repository root inside the Houmo conversion
-container. Before export, set the policy type to `pi05` and the device to CPU:
+Create a log directory before running commands that use `tee`:
 
 ```bash
-python3 prepare_model.py models/pretrained_model --mode export
+mkdir -p log
 ```
 
-The helper updates the model's `config.json` and preprocessor JSON. Verify that
-the checkpoint's image keys, six-action order, normalization statistics, and
-tokenizer match the training dataset before continuing.
+## End-to-End Usage
 
-## Export and Quantization
-
-Export the vision tower, Gemma-2B prefill, Gemma action expert, and action/time
-projection modules:
+For a clean SO101 checkpoint in `models/pretrained_model`, the usual flow is:
 
 ```bash
-python3 export/vision.py --model_path ./models/pretrained_model
-python3 export/gemma_2b.py --config ./config/pi0/llm/pi05_gemma_2b_xh2a_2k_so101_mask.py
-python3 export/gemma_expert.py --config ./config/pi0/llm/pi05_gemma_expert_300m_xh2a_2k_so101_mask.py
-python3 export/action_heads.py --model_path ./models/pretrained_model
+python3 so101_patch_model_config.py \
+  --model-dir models/pretrained_model \
+  --mode export \
+  --n-action-steps 30
+
+QUANT_TYPE=w8a8_sefp bash so101_export_quant.sh models/pretrained_model \
+  2>&1 | tee log/so101_export_w8a8.log
+
+bash so101_build_hmm.sh \
+  2>&1 | tee log/so101_build_w8a8.log
+
+python3 so101_patch_model_config.py \
+  --model-dir models/pretrained_model \
+  --mode infer \
+  --n-action-steps 30
 ```
 
-The vision and action-head scripts request Houmo `w8a8h1_sefp`; the Gemma
-components use the model-zoo PTQ path. These scripts are CPU-side conversion
-steps: a zero IPU utilization reading during export does not imply that the
-eventual HMM inference will run on CPU. Intermediate files are written beneath
-`artifacts/xh2/` and are not tracked by Git.
+After these steps, `run_so101_hm.py` uses the checkpoint metadata from
+`models/pretrained_model` and the compiled Houmo runtime artifacts under
+`outputs/xh2/`.
 
-## Compile for M50
+## Checkpoint Preparation
+
+Before W8A8 export, patch the trained checkpoint into LeRobot PI0.5 export mode:
 
 ```bash
-python3 build/build_vision_so101.py
-python3 build/build_gemma_2b_prefill_so101.py
-python3 build/build_gemma_expert_300m_decode_so101.py
-python3 build/build_pi05_action_time_linear_so101.py
+python3 so101_patch_model_config.py \
+  --model-dir models/pretrained_model \
+  --mode export \
+  --n-action-steps 30
 ```
 
-The runtime expects these seven files under `artifacts/xh2/`:
+This updates lightweight JSON/config files only. It does not change model
+weights. In export mode, the policy `type` is set to `pi05`, devices are patched
+to CPU where needed, and the SO101 LLM config files are aligned to the selected
+checkpoint path.
+
+## W8A8 Export
+
+Run the one-command quantized export wrapper:
+
+```bash
+QUANT_TYPE=w8a8_sefp bash so101_export_quant.sh models/pretrained_model \
+  2>&1 | tee log/so101_export_w8a8.log
+```
+
+The wrapper performs the SO101 export sequence:
 
 ```text
-siglip.hmm
-gemma_2b_prefill.hmm
-gemma_expert_300m_decode.hmm
-action_in_proj.hmm
-action_out_proj.hmm
-time_mlp.hmm
-embedding.pt
+pi05_export_vision_xh2a_so101.py
+pi05_export_llm_xh2a_libero.py
+pi05_export_experts_xh2a_libero.py
+pi05_export_other_xh2a_libero.py
 ```
 
-Set `HOUMO_ARTIFACT_DIR` when the compiled files live elsewhere. The runtime
-checks for all seven files before initializing TCIM. Do not mix artifacts from
-different checkpoints.
+The `*_libero.py` names are historical filenames from the Houmo example stack;
+with the SO101 config files, they are used for the SO101 Gemma/action-expert and
+action/time module export path.
+
+Export outputs are written under `outputs/xh2/`, and step logs are also written
+under `outputs/logs/`.
+
+## HMM Build
+
+Compile the exported modules into M50 runtime artifacts:
+
+```bash
+bash so101_build_hmm.sh \
+  2>&1 | tee log/so101_build_w8a8.log
+```
+
+The build wrapper runs:
+
+```text
+build_vision_so101.py
+build_gemma_2b_prefill_so101.py
+build_gemma_expert_300m_decode_so101.py
+build_pi05_action_time_linear_so101.py
+```
+
+It also creates the runtime filenames expected by `modeling_pi05_hm.py`:
+
+```text
+outputs/xh2/siglip.hmm
+outputs/xh2/gemma_2b_prefill.hmm
+outputs/xh2/gemma_expert_300m_decode.hmm
+outputs/xh2/action_in_proj.hmm
+outputs/xh2/action_out_proj.hmm
+outputs/xh2/time_mlp.hmm
+outputs/xh2/embedding.pt
+```
+
+Do not mix HMM files, `embedding.pt`, or checkpoint metadata from different
+training checkpoints.
+
+## Runtime Config
+
+After HMM build and before deployment inference, patch the same checkpoint into
+Houmo runtime mode:
+
+```bash
+python3 so101_patch_model_config.py \
+  --model-dir models/pretrained_model \
+  --mode infer \
+  --n-action-steps 30
+```
+
+In inference mode, the policy `type` is set to `hm_pi05`, so
+`run_so101_hm.py` loads the TCIM-backed policy in `modeling_pi05_hm.py`.
 
 ## SO101 Inference
 
-Calibrate the robot using the actual USB serial port and keep its calibration
-file outside Git:
-
-```bash
-python3 calibrate_so101.py --port /dev/ttyACM0 --robot-id so101_follower
-python3 prepare_model.py models/pretrained_model --mode runtime
-```
-
-Start with a read-and-predict run. **Without `--send-action`, the script does
-not send policy actions to the motors.** Confirm camera identity and supported
-resolution/FPS on your own machine; Linux `/dev/video*` indices can change.
+Start with a dry run by using the same command below without `--send-action`.
+In dry-run mode, the script reads observations and predicts actions, but does
+not command the motors.
 
 ```bash
 python3 -u run_so101_hm.py \
-  --model-path ./models/pretrained_model \
-  --duration-s 10 --fps 10 \
-  --port /dev/ttyACM0 \
-  --top-camera 6 --side-camera 8 \
-  --camera-fps 10 \
-  --no-calibrate --use-degrees --no-clip-action-range \
-  --task "夹起方块并放入白色盒子里，放入成功拍一下黄色按钮"
+  --model-path models/pretrained_model \
+  --task "pick up the block and place it into the yellow box" \
+  --port /dev/ttyACM2 \
+  --robot-id so101_follower \
+  --use-degrees \
+  --max-relative-target 10.0 \
+  --camera-type opencv \
+  --top-camera 0 \
+  --side-camera 2 \
+  --top-camera-fourcc MJPG \
+  --side-camera-fourcc MJPG \
+  --camera-width 640 \
+  --camera-height 480 \
+  --camera-fps 30 \
+  --fps 10 \
+  --duration-s 60 \
+  --send-action
 ```
 
-After checking observations, action values, calibration, and the workspace,
-repeat the command with `--send-action`. Keep the first powered run short and
-retain a conservative `--max-relative-target`. The example task text and camera
-indices describe one setup, not universal defaults. `--use-degrees` reflects a
-dataset whose first five joints are angles and whose gripper is a percentage.
+Adjust camera indices, serial port, task text, and safety limits to match your
+actual robot and training setup.
 
-### Key Runtime Options
+### Runtime Options
 
 | Option | Purpose |
 | --- | --- |
-| `--model-path` | Checkpoint directory used for policy metadata and processors |
+| `--model-path` | Checkpoint directory used for config and processors |
+| `--robot-id` | Robot calibration/runtime identifier |
+| `--port` | Feetech motor serial port |
+| `--camera-type` | Camera backend, for example `opencv` |
 | `--top-camera`, `--side-camera` | Top and side camera device indices/paths |
-| `--camera-fps`, `--fps` | Camera capture rate and action-loop target rate |
+| `--top-camera-fourcc`, `--side-camera-fourcc` | Camera pixel format, for example `MJPG` |
+| `--camera-width`, `--camera-height` | Camera capture resolution |
+| `--camera-fps`, `--fps` | Camera capture rate and policy loop rate |
 | `--task` | Instruction text; use the training task wording |
-| `--use-degrees` | Degree-based arm joints, percentage-based gripper |
-| `--max-relative-target` | Per-step motor target limit |
-| `--no-calibrate` | Reuse the existing calibration file |
-| `--send-action` | Enable actual motor commands; omit for read-and-predict |
-
-## Verification and Limitations
-
-- This release is source-only. It cannot run without the external checkpoint,
-  vendor software, compiled artifacts, calibration, and hardware.
-- No benchmark success rate, latency, or accuracy claim is made for this release.
-- A checkpoint trained with different camera keys, action units, or task text
-  requires corresponding preprocessing changes; the HMM alone is insufficient.
+| `--use-degrees` | Use degree-based arm joints and percentage-style gripper values |
+| `--max-relative-target` | Per-step motor target safety limit |
+| `--send-action` | Enable actual motor commands |
 
 ## Acknowledgements and License
 
-The integration builds on [LeRobot](https://github.com/huggingface/lerobot) and
-the PI0.5/OpenPI model family. LeRobot's Apache-2.0 license is preserved under
-`third_party/lerobot/LICENSE`. [QuantVLA](https://github.com/AIoT-MLSys-Lab/QuantVLA)
-inspired the organization of this README only; its PTQ implementation is not
-included.
+This integration builds on [LeRobot](https://github.com/huggingface/lerobot),
+the PI0.5/OpenPI model family, and the Houmo Dadao/XH2 deployment toolchain.
+LeRobot's license is preserved under `lerobot/LICENSE`.
 
-See [NOTICE.md](NOTICE.md) for third-party boundaries and distribution details.
+See `NOTICE.md` for third-party boundaries and distribution details.
