@@ -233,6 +233,10 @@ def main() -> int:
         if not required.exists():
             raise SystemExit(f"Required file missing: {required}")
 
+    # Parse all checkpoint JSON before any config writes or backups.
+    for path in (config_path, pre_path, post_path):
+        load_json(path)
+
     all_changes += [f"config.json: {x}" for x in patch_model_config(config_path, mode, args.n_action_steps, base_model_str, stamp, do_backup)]
     all_changes += [f"policy_preprocessor.json: {x}" for x in set_preprocessor(pre_path, tokenizer_str, stamp, do_backup)]
     all_changes += [f"policy_postprocessor.json: {x}" for x in set_postprocessor(post_path, stamp, do_backup)]
