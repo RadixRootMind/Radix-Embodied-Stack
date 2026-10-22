@@ -272,6 +272,12 @@ actual robot and training setup.
 | `--max-relative-target` | Per-step motor target safety limit |
 | `--send-action` | Enable actual motor commands |
 
+## Community
+
+Join the RadixRootMind China developer WeChat group:
+
+<img src="https://github.com/RadixRootMind/RadixQuantVLA/raw/main/assets/RadixRootMind_group.png" alt="RadixRootMind China developer WeChat group" width="320">
+
 ## Acknowledgements and License
 
 This integration builds on [LeRobot](https://github.com/huggingface/lerobot),
